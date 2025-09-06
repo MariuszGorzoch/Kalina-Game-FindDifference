@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Znajdź różnice — Jedno pomieszczenie na zadanie</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; }
+      html, body { height: 100%; margin: 0; }
+      body { display: grid; place-items: center; background: #0f172a; color: #e2e8f0; }
+      .card { width: min(1100px, 96vw); padding: 24px; border-radius: 16px; background: #111827; box-shadow: 0 10px 30px rgba(0,0,0,.35); position: relative; overflow: hidden; }
+      header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 1.25rem; }
+      .meta { display: flex; gap: 12px; font-weight: 600; }
+      .meta span { background: #0b1220; padding: 6px 10px; border-radius: 10px; }
+      .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+      button { appearance: none; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: .95rem; }
+      #startBtn { background: #22c55e; color: #052e13; }
+      #restartBtn { background: #a78bfa; color: #120a2a; display: none; }
+      #nextBtn { background: #38bdf8; color: #032234; display: none; }
+      #hintBtn { background: #f59e0b; color: #2b1600; display: none; }
+      .board { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+      .pane { background: #0b1220; border-radius: 14px; padding: 10px; }
+      .pane h2{ margin: 0 0 8px; font-size: .95rem; opacity: .85; }
+      canvas { width: 100%; aspect-ratio: 4 / 3; background: #0a0f1a; border-radius: 10px; display: block; }
+      .msg { margin-top: 10px; font-weight: 600; min-height: 1.6em; }
+      .hidden { display: none !important; }
+      .center { text-align: center; }
+      .ok { color: #22c55e; }
+      .bad { color: #f43f5e; }
+      .label { font-weight: 700; font-size: .9rem; }
+
+      /* --- GAME OVER OVERLAY --- */
+      .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); backdrop-filter: blur(2px); }
+      .overlay.show { display: flex; }
+      .go-panel { text-align: center; padding: 24px 28px; border-radius: 16px; background: #641717; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+      .go-letters { display: inline-flex; gap: 6px; font-size: clamp(28px, 6vw, 64px); font-weight: 900; color: #ef4444; letter-spacing: 2px; perspective: 600px; }
+      .go-letters .char { opacity: 0; transform: translateY(16px) rotateX(60deg); text-shadow:
+          0 1px 0 #7f1d1d,
+          0 2px 0 #7f1d1d,
+          0 3px 0 #7f1d1d,
+          0 4px 0 #7f1d1d,
+          0 6px 8px rgba(0,0,0,.35);
+        animation: popIn .5s ease-out forwards; }
+      @keyframes popIn { to { opacity: 1; transform: translateY(0) rotateX(0deg); } }
+      .go-sub { margin-top: 10px; color: #fde68a; font-weight: 700; opacity: .95; }
+      #tryAgainBtn { margin-top: 14px; background: #fca5a5; color: #3f0a0a; font-size: .9rem; padding: 8px 12px; border-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="card" role="application" aria-label="Gra: Znajdź różnice — Jedno pomieszczenie">
+      <header>
+        <h1>Znajdź różnice — Jedno pomieszczenie</h1>
+        <div class="meta">
+          <span id="scoreBox" aria-live="polite">Punkty: 0</span>
+          <span id="levelBox">Poziom: 0 / 3</span>
+          <span id="leftBox">Pozostało: —</span>
+        </div>
+        <div class="controls">
+          <button id="startBtn" aria-label="Start gry">Start</button>
+          <button id="nextBtn" aria-label="Następny poziom">Następny ▶</button>
+          <button id="restartBtn" aria-label="Zacznij od nowa">Restart</button>
+          <button id="hintBtn" aria-label="Podpowiedź (zużywa 1 próbę)">Podpowiedź (−1 próba)</button>
+        </div>
+      </header>
+
+      <p id="intro" class="msg">
+        Kliknij <strong>Start</strong>. Każdy poziom to <strong>jedno pomieszczenie</strong> (Salon, Kuchnia, Sypialnia, Łazienka) w <strong>stylu animacji</strong> z <strong>tłem i dekoracjami</strong> (dywan, lampa, obraz, TV). Różnice mogą dotyczyć także <strong>koloru ścian</strong> lub <strong>obrazu na ścianie</strong>. Każdy kolejny poziom ma <strong>+2 różnice</strong>, jest <strong>trudniejszy</strong> i daje <strong>więcej punktów</strong>.
+      </p>
+
+      <div class="board" aria-hidden="false" id="boardRoot">
+        <div class="pane">
+          <h2>Lewy obraz</h2>
+          <canvas id="canvasL" width="640" height="480"></canvas>
+        </div>
+        <div class="pane">
+          <h2>Prawy obraz</h2>
+          <canvas id="canvasR" width="640" height="480"></canvas>
+        </div>
+      </div>
+
+      <p id="status" class="msg center" role="status" aria-live="polite"></p>
+
+      <!-- GAME OVER overlay -->
+      <div class="overlay" id="gameOver" aria-hidden="true">
+        <div class="go-panel">
+          <div class="go-letters" id="goLetters" aria-label="Koniec gry" role="heading" aria-level="1"></div>
+          <div class="go-sub">3 nieudane próby — gra zakończona</div>
+          <button id="tryAgainBtn" aria-label="Zacznij od nowa (mniejszy przycisk)">Zacznij od nowa</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // =====================
+      // KONFIG
+      // =====================
+      const LEVELS = 3;                 // liczba poziomów
+      const BASE_DIFFS = 3;             // poziom 1: 3 różnice
+      const DIFFS_STEP = 2;             // każdy kolejny +2
+      const BASE_POINTS = 10;           // bazowe punkty
+      const DIFF_RADIUS = 22;           // promień trafienia (px)
+      const MAX_MISSES = 3;             // po 3 nietrafionych — koniec gry
+
+      // =====================
+      // DOM
+      // =====================
+      const startBtn = document.getElementById('startBtn');
+      const restartBtn = document.getElementById('restartBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const hintBtn = document.getElementById('hintBtn');
+      const scoreBox = document.getElementById('scoreBox');
+      const levelBox = document.getElementById('levelBox');
+      const leftBox = document.getElementById('leftBox');
+      const statusEl = document.getElementById('status');
+      const introEl = document.getElementById('intro');
+      const boardRoot = document.getElementById('boardRoot');
+
+      const cL = document.getElementById('canvasL');
+      const cR = document.getElementById('canvasR');
+      const ctxL = cL.getContext('2d');
+      const ctxR = cR.getContext('2d');
+
+      // Overlay DOM
+      const overlay = document.getElementById('gameOver');
+      const goLetters = document.getElementById('goLetters');
+      const tryAgainBtn = document.getElementById('tryAgainBtn');
+
+      // =====================
+      // STAN
+      // =====================
+      let level = 0; // 1..LEVELS
+      let score = 0;
+      let found = new Set();
+      let levelData = null; // { rooms: [...], items: [...], diffs: [...] }
+      let misses = 0;
+      let gameOver = false;
+
+      // =====================
+      // UTILS
+      // =====================
+      const dist = (a,b,x,y) => Math.hypot(a-x, b-y);
+      function rng(seed){ return function(){ seed = (seed*1664525 + 1013904223) >>> 0; return seed/2**32; } }
+
+      // --- Paleta ---
+      const colors = {
+        wall: '#94a3b8', floorA: '#0d1628', floorB: '#0a1322', label: '#e2e8f0',
+        wood: '#b45309', fabric: '#64748b', metal: '#9ca3af', water: '#38bdf8', accent: '#22c55e',
+        rug: '#334155', lamp: '#facc15', tv: '#0b1320'
+      };
+
+      function textCenter(ctx, x,y, txt){
+        ctx.save();
+        ctx.fillStyle = colors.label; ctx.font = '700 16px system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(txt, x, y);
+        ctx.restore();
+      }
+
+      if (!CanvasRenderingContext2D.prototype.roundRect){
+        CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){ this.beginPath(); this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r); this.arcTo(x+w,y+h,x,y+h,r); this.arcTo(x,y+h,x,y,r); this.arcTo(x,y,x+w,y,r); this.closePath(); };
+      }
+
+      function drawRoomOutline(ctx, r){
+        // styl animacji: gradient podłogi + grube ściany, zaokrąglenia
+        ctx.save();
+        const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y+r.h);
+        g.addColorStop(0, colors.floorA); g.addColorStop(1, colors.floorB);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 16); ctx.fill();
+        ctx.strokeStyle = colors.wall; ctx.lineWidth = 6; ctx.stroke();
+        ctx.restore();
+        textCenter(ctx, r.x + r.w/2, r.y + 20, r.name);
+      }
+
+      // =====================
+      // RYSOWANIE MEBLI / DEKORACJI (wektorowo)
+      // =====================
+      function sofa(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.fabric; ctx.strokeStyle = '#475569'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(x,y,w,h,8); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.roundRect(x, y, 12, h, 8); ctx.roundRect(x+w-12, y, 12, h, 8); ctx.fill(); ctx.restore(); }
+      function table(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.wood; ctx.strokeStyle = '#92400e'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function bed(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.fabric; ctx.strokeStyle = '#475569'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(x,y,w,h,8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#e5e7eb'; ctx.fillRect(x+6,y+6,w-12,h/2-8); ctx.fillRect(x+6,y+h/2+2,w-12,h/2-8); ctx.restore(); }
+      function wardrobe(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.wood; ctx.strokeStyle = '#92400e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x,y,w,h,4); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function stove(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.metal; ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke(); const r=4; for(let i=0;i<4;i++){ const cx=x+10+(i%2)*(w-20), cy=y+10+Math.floor(i/2)*(h-20); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle='#111827'; ctx.fill(); } ctx.restore(); }
+      function sink(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.water; ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function fridge(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = '#e5e7eb'; ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function bath(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = colors.water; ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(x,y,w,h,12); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function toilet(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = '#e5e7eb'; ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x+w/2,y+h/2, w/2, h/2, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      function plant(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = '#b45309'; ctx.beginPath(); ctx.roundRect(x,y+h-10,w,10,3); ctx.fill(); ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x+w/2, y+h-10); ctx.lineTo(x+w/2, y+6); ctx.stroke(); for(let i=0;i<3;i++){ ctx.beginPath(); ctx.ellipse(x+w/2-8, y+8+i*8, 8,4, Math.PI/6, 0, Math.PI*2); ctx.fillStyle='#16a34a'; ctx.fill(); ctx.beginPath(); ctx.ellipse(x+w/2+8, y+14+i*8, 8,4, -Math.PI/6, 0, Math.PI*2); ctx.fill(); } ctx.restore(); }
+      function rug(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = '#334155'; ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.roundRect(x,y,w,h,12); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = '#1f2937'; ctx.setLineDash([6,6]); ctx.strokeRect(x+6,y+6,w-12,h-12); ctx.setLineDash([]); ctx.restore(); }
+      function floorLamp(ctx,x,y,w,h){ ctx.save(); ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x+w/2,y+h); ctx.lineTo(x+w/2,y+10); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(x+w/2,y+10,8,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+      function tv(ctx,x,y,w,h){ ctx.save(); ctx.fillStyle = '#0b1320'; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.stroke(); ctx.fillStyle = '#0ea5e9'; ctx.globalAlpha = .08; ctx.fillRect(x+6,y+6,w-12,h-12); ctx.globalAlpha = 1; ctx.restore(); }
+      function painting(ctx,x,y,w,h,variant=0){ ctx.save(); ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 2; ctx.stroke(); const ix=x+6, iy=y+6, iw=w-12, ih=h-12; ctx.save(); ctx.beginPath(); ctx.rect(ix,iy,iw,ih); ctx.clip(); if(variant%3===0){ ctx.fillStyle = '#60a5fa'; ctx.fillRect(ix,iy,iw,ih); ctx.fillStyle='#f43f5e'; ctx.beginPath(); ctx.arc(ix+iw*0.3, iy+ih*0.6, Math.min(iw,ih)*0.2, 0, Math.PI*2); ctx.fill(); } else if(variant%3===1){ ctx.fillStyle = '#10b981'; ctx.fillRect(ix,iy,iw,ih); ctx.fillStyle='#fde047'; ctx.fillRect(ix+iw*0.2, iy+ih*0.2, iw*0.6, ih*0.2); } else { ctx.fillStyle = '#0ea5e9'; ctx.fillRect(ix,iy,iw,ih); ctx.strokeStyle='#f97316'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(ix+10,iy+10); ctx.lineTo(ix+iw-10,iy+ih-10); ctx.moveTo(ix+iw-10,iy+10); ctx.lineTo(ix+10,iy+ih-10); ctx.stroke(); } ctx.restore(); ctx.restore(); }
+
+      // Renderer elementu
+      function drawItem(ctx, it){
+        const map = { sofa, table, bed, wardrobe, stove, sink, fridge, bath, toilet, plant, rug, floorLamp, tv, painting };
+        const f = map[it.type];
+        if (typeof f === 'function') {
+          if (it.type==='painting') f(ctx, it.x, it.y, it.w, it.h, it.variant||0);
+          else f(ctx, it.x, it.y, it.w, it.h);
+        } else {
+          ctx.save(); ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2; ctx.strokeRect(it.x, it.y, it.w, it.h); ctx.restore();
+        }
+        if (it.color){ ctx.save(); ctx.globalCompositeOperation='multiply'; ctx.fillStyle = it.color; ctx.fillRect(it.x, it.y, it.w, it.h); ctx.restore(); }
+      }
+
+      // =====================
+      // GENERATOR POKOJU
+      // =====================
+      function makeSingleRoom(level){
+        // Jeden pokój na cały poziom
+        const pad = 40; const W = cL.width - pad*2; const H = cL.height - pad*2;
+        const room = { x: pad, y: pad, w: W, h: H };
+        const types = ['Salon','Kuchnia','Sypialnia','Łazienka'];
+        const name = types[(level-1) % types.length];
+        const R = rng(1000+level*777);
+        const items = [];
+        if (name==='Salon'){
+          items.push({type:'sofa', x:room.x+W*0.14, y:room.y+H*0.66, w:170, h:40});
+          items.push({type:'rug', x:room.x+W*0.35, y:room.y+H*0.58, w:W*0.28, h:H*0.12});
+          items.push({type:'table', x:room.x+W*0.44, y:room.y+H*0.62, w:100, h:32});
+          items.push({type:'floorLamp', x:room.x+W*0.80, y:room.y+H*0.62, w:16, h:60});
+          items.push({type:'tv', x:room.x+W*0.60, y:room.y+H*0.30, w:120, h:60});
+          items.push({type:'painting', x:room.x+W*0.10, y:room.y+H*0.20, w:120, h:70, variant:0});
+          items.push({type:'plant', x:room.x+W*0.80, y:room.y+H*0.70, w:28, h:52});
+        } else if (name==='Kuchnia'){
+          items.push({type:'stove', x:room.x+24, y:room.y+24, w:78, h:40});
+          items.push({type:'sink', x:room.x+W-110, y:room.y+26, w:70, h:36});
+          items.push({type:'fridge', x:room.x+W-86, y:room.y+H-106, w:58, h:86});
+          items.push({type:'table', x:room.x+W*0.35, y:room.y+H*0.60, w:120, h:36});
+          items.push({type:'rug', x:room.x+W*0.20, y:room.y+H*0.70, w:W*0.22, h:H*0.10});
+          items.push({type:'painting', x:room.x+W*0.10, y:room.y+H*0.18, w:110, h:64, variant:1});
+        } else if (name==='Sypialnia'){
+          items.push({type:'bed', x:room.x+36, y:room.y+H*0.22, w:200, h:110});
+          items.push({type:'wardrobe', x:room.x+W-110, y:room.y+36, w:78, h:138});
+          items.push({type:'rug', x:room.x+W*0.45, y:room.y+H*0.65, w:W*0.26, h:H*0.12});
+          items.push({type:'table', x:room.x+W*0.62, y:room.y+H*0.70, w:90, h:30});
+          items.push({type:'painting', x:room.x+W*0.15, y:room.y+H*0.20, w:120, h:70, variant:2});
+        } else if (name==='Łazienka'){
+          items.push({type:'bath', x:room.x+32, y:room.y+H-92, w:190, h:64});
+          items.push({type:'toilet', x:room.x+W-84, y:room.y+48, w:36, h:28});
+          items.push({type:'sink', x:room.x+W*0.46, y:room.y+H*0.24, w:70, h:34});
+          items.push({type:'rug', x:room.x+W*0.20, y:room.y+H*0.65, w:W*0.20, h:H*0.10});
+          items.push({type:'painting', x:room.x+W*0.10, y:room.y+H*0.18, w:110, h:64, variant:0});
+        }
+        const jitter = (level-1)*4; items.forEach(it=>{ it.x += (R()*2-1)*jitter; it.y += (R()*2-1)*jitter; });
+        return {rooms:[{...room, name}], items};
+      }
+
+      // =====================
+      // GENEROWANIE RÓŻNIC — WYRAŹNE, BEZ KONFLIKTÓW
+      // =====================
+      function generateDiffs(level, base){
+        const count = BASE_DIFFS + DIFFS_STEP*(level-1); // 3,5,7
+        const R = rng(5000+level*333);
+        const diffs = [];
+        const removedTargets = new Set();
+        const usedTargets = new Set();
+        const choices = ['removeItem','recolorItem','moveItem','extraItem','wallColor','paintingVariant'];
+
+        function pickTarget(avoidRemoved=true){
+          let tries = 0;
+          while (tries++ < 50){
+            const t = Math.floor(R()*base.items.length);
+            if (!base.items[t]) continue;
+            if (avoidRemoved && removedTargets.has(t)) continue;
+            if (usedTargets.has(t)) continue; // gwarancja unikalności per poziom dla czytelności
+            return t;
+          }
+          return null;
+        }
+
+        for(let i=0;i<count;i++){
+          const kind = choices[i % choices.length];
+          if (kind==='extraItem'){
+            const r = base.rooms[0];
+            const it = {type:'table', x:r.x+30+R()*(r.w-120), y:r.y+30+R()*(r.h-100), w:120, h:60, color:'#ff0000'};
+            diffs.push({kind, item:it, x:it.x+it.w/2, y:it.y+it.h/2});
+          } else if (kind==='wallColor'){
+            const altColor = ['#ef4444','#22c55e','#eab308','#38bdf8'][i%4];
+            const r = base.rooms[0];
+            diffs.push({kind:'wallColor', altColor, x:r.x+r.w/2, y:r.y+24});
+          } else if (kind==='paintingVariant'){
+            const pIndex = base.items.findIndex((x,idx)=> x.type==='painting' && !removedTargets.has(idx) && !usedTargets.has(idx));
+            if (pIndex>=0){ const it = base.items[pIndex]; diffs.push({kind:'paintingVariant', target:pIndex, x:it.x+it.w/2, y:it.y+it.h/2}); usedTargets.add(pIndex); }
+            else { // fallback — jeśli brak obrazu, zrób recolor/move na innym obiekcie
+              i--; continue;
+            }
+          } else if (kind==='removeItem'){
+            const target = pickTarget(false);
+            if (target==null){ i--; continue; }
+            const it = base.items[target];
+            diffs.push({kind, target, x:it.x+it.w/2, y:it.y+it.h/2});
+            removedTargets.add(target); usedTargets.add(target);
+          } else if (kind==='recolorItem' || kind==='moveItem'){
+            const target = pickTarget(true);
+            if (target==null){ i--; continue; }
+            const it = base.items[target];
+            if (kind==='recolorItem'){
+              const altColor = ['#ef4444','#eab308','#10b981','#60a5fa'][i%4];
+              diffs.push({kind, target, altColor, x:it.x+it.w/2, y:it.y+it.h/2});
+            } else {
+              const dx = (R()*2-1) * (40+level*10);
+              const dy = (R()*2-1) * (40+level*10);
+              diffs.push({kind, target, dx, dy, x:it.x+it.w/2+dx, y:it.y+it.h/2+dy});
+            }
+            usedTargets.add(target);
+          }
+        }
+        return diffs;
+      }
+
+      // =====================
+      // RYSOWANIE PLANSZY (bez podpowiedzi)
+      // =====================
+      function drawPlan(ctx, data, applyDiffs){
+        ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+        // tło planszy
+        const bg = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+        bg.addColorStop(0,'#0c1220'); bg.addColorStop(1,'#0a0f1a');
+        ctx.fillStyle = bg; ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+        const room = data.rooms[0];
+        drawRoomOutline(ctx, room);
+        const items = data.items.map(o=> ({...o}));
+        if (applyDiffs){
+          data.diffs.forEach(df=>{
+            if (df.kind==='removeItem') items[df.target] && (items[df.target].__skip = true);
+            else if (df.kind==='recolorItem') items[df.target] && (items[df.target].color = df.altColor);
+            else if (df.kind==='moveItem'){ if(items[df.target]){ items[df.target].x += df.dx; items[df.target].y += df.dy; } }
+            else if (df.kind==='extraItem') items.push({...df.item});
+            else if (df.kind==='paintingVariant' && items[df.target] && items[df.target].type==='painting'){ items[df.target].variant = (items[df.target].variant||0)+1; }
+          });
+        }
+        items.forEach(it=>{ if (!it.__skip) drawItem(ctx,it); });
+        // różnica koloru ścian — półprzezroczysty overlay na pokoju (to jest sama różnica, nie podpowiedź)
+        if (applyDiffs){
+          const wallDiff = data.diffs.find(d=>d.kind==='wallColor');
+          if (wallDiff){ ctx.save(); ctx.globalAlpha = .25; ctx.fillStyle = wallDiff.altColor; ctx.beginPath(); ctx.roundRect(room.x, room.y, room.w, room.h, 16); ctx.fill(); ctx.restore(); }
+        }
+      }
+
+      // =====================
+      // UI / LOGIKA
+      // =====================
+      function renderLevel(){
+        const ptsPerDiff = BASE_POINTS * level; // rosnąca punktacja per poziom
+        const leftTotal = levelData.diffs.length - found.size;
+        levelBox.textContent = `Poziom: ${level} / ${LEVELS}`;
+        leftBox.textContent = `Pozostało: ${leftTotal}`;
+        scoreBox.textContent = `Punkty: ${score} (+${ptsPerDiff}/różn.)`;
+        statusEl.textContent = 'Znajdź wszystkie różnice (kliknij po lewej lub prawej).';
+        drawPlan(ctxL, levelData, false);
+        drawPlan(ctxR, levelData, true);
+        nextBtn.style.display = 'none';
+        hintBtn.style.display = 'inline-block';
+      }
+
+      function startGame(){
+        level = 1; score = 0; found = new Set(); misses = 0; gameOver = false;
+        hideGameOver();
+        const base = makeSingleRoom(level);
+        const diffs = generateDiffs(level, base);
+        levelData = { ...base, diffs };
+        introEl.classList.add('hidden');
+        restartBtn.style.display = 'inline-block';
+        renderLevel();
+      }
+
+      function restartGame(){
+        introEl.classList.remove('hidden');
+        nextBtn.style.display = 'none';
+        restartBtn.style.display = 'none';
+        hintBtn.style.display = 'none';
+        statusEl.textContent = '';
+        levelBox.textContent = `Poziom: 0 / ${LEVELS}`;
+        leftBox.textContent = 'Pozostało: —';
+        score = 0; scoreBox.textContent = 'Punkty: 0';
+        ctxL.clearRect(0,0,cL.width,cL.height);
+        ctxR.clearRect(0,0,cR.width,cR.height);
+        hideGameOver();
+        levelData = null;
+      }
+
+      function completeLevel(){
+        if (level < LEVELS) {
+          statusEl.innerHTML = `<span class="ok">Super!</span> Poziom ukończony. Kliknij <strong>Następny</strong>.`;
+          nextBtn.style.display = 'inline-block';
+        } else {
+          statusEl.innerHTML = `<span class="ok">Gratulacje!</span> Ukończyłeś wszystkie poziomy. Wynik końcowy: <strong>${score}</strong>.`;
+          nextBtn.style.display = 'none';
+        }
+      }
+
+      function handleClick(ev, which){
+        if (gameOver || !levelData) return;
+        const canvas = (which==='L' ? cL : cR);
+        const rect = canvas.getBoundingClientRect();
+        const x = (ev.clientX - rect.left) * ( canvas.width / rect.width );
+        const y = (ev.clientY - rect.top)  * ( canvas.height / rect.height );
+        const t = levelData;
+        const ptsPerDiff = BASE_POINTS * level;
+        const idx = t.diffs.findIndex((d,i)=> !found.has(i) && dist(d.x,d.y,x,y) <= DIFF_RADIUS);
+        if (idx !== -1) {
+          found.add(idx); score += ptsPerDiff;
+          // feedback przy trafieniu (pojawia się statyczny okrąg w miejscu trafienia — to NIE jest podpowiedź przed kliknięciem)
+          [ctxL, ctxR].forEach((ctx)=>{ ctx.save(); ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(t.diffs[idx].x, t.diffs[idx].y, 24, 0, Math.PI*2); ctx.stroke(); ctx.restore(); });
+          const leftNow = t.diffs.length - found.size;
+          leftBox.textContent = `Pozostało: ${leftNow}`;
+          scoreBox.textContent = `Punkty: ${score} (+${ptsPerDiff}/różn.)`;
+          statusEl.textContent = '';
+          if (found.size === t.diffs.length) completeLevel();
+        } else {
+          registerMiss('To nie różnica.');
+        }
+      }
+
+      function nextLevel(){
+        if (level >= LEVELS || gameOver) return;
+        level += 1; found = new Set(); misses = 0;
+        const base = makeSingleRoom(level);
+        const diffs = generateDiffs(level, base);
+        levelData = { ...base, diffs };
+        renderLevel();
+      }
+
+      // =====================
+      // PODPOWIEDŹ (−1 próba)
+      // =====================
+      function useHint(){
+        if (gameOver || !levelData) return;
+        // zabiera 1 próbę natychmiast
+        registerMiss('Podpowiedź użyta (−1 próba).');
+        if (gameOver) return; // mogło zakończyć grę, jeśli to była 3.
+        // wskaż nieodkrytą różnicę — krótki blik po prawej
+        const pool = levelData.diffs.map((d,i)=>({d,i})).filter(x=> !found.has(x.i));
+        if (!pool.length) return;
+        const pick = pool[Math.floor(Math.random()*pool.length)].d;
+        const ctx = ctxR;
+        const cx = pick.x, cy = pick.y;
+        let step = 0; const max = 18;
+        const anim = setInterval(()=>{
+          step++;
+          ctx.save();
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)';
+          ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.arc(cx,cy, 14 + step, 0, Math.PI*2); ctx.stroke();
+          ctx.restore();
+          if (step>=max) clearInterval(anim);
+        }, 22);
+      }
+
+      function registerMiss(msg){
+        misses += 1;
+        statusEl.innerHTML = `<span class="bad">${msg}</span> Próby: ${misses}/${MAX_MISSES}`;
+        if (misses >= MAX_MISSES) endGame();
+      }
+
+      // =====================
+      // GAME OVER
+      // =====================
+      function showGameOver(){
+        overlay.classList.add('show');
+        overlay.setAttribute('aria-hidden','false');
+        boardRoot.setAttribute('aria-hidden','true');
+        goLetters.innerHTML = '';
+        const text = 'KONIEC GRY';
+        [...text].forEach((ch, i)=>{
+          const span = document.createElement('span');
+          span.className = 'char';
+          span.textContent = ch;
+          span.style.animationDelay = `${i*120}ms`;
+          goLetters.appendChild(span);
+        });
+      }
+      function hideGameOver(){
+        overlay.classList.remove('show');
+        overlay.setAttribute('aria-hidden','true');
+        boardRoot.setAttribute('aria-hidden','false');
+        goLetters.innerHTML = '';
+      }
+      function endGame(){
+        gameOver = true;
+        showGameOver();
+      }
+
+      // =====================
+      // ZDARZENIA UI
+      // =====================
+      startBtn.addEventListener('click', startGame);
+      restartBtn.addEventListener('click', restartGame);
+      nextBtn.addEventListener('click', nextLevel);
+      tryAgainBtn.addEventListener('click', startGame);
+      hintBtn.addEventListener('click', useHint);
+      cL.addEventListener('click', (e)=>handleClick(e,'L'));
+      cR.addEventListener('click', (e)=>handleClick(e,'R'));
+
+      // =====================
+      // DEV SELF-TESTS (smoke)
+      // =====================
+      (function runSelfTests(){
+        const results = [];
+        function assert(name, fn){
+          try { const ok = fn(); results.push({name, ok: !!ok}); if(!ok) console.error('Test failed:', name); }
+          catch(e){ results.push({name:false, ok:false, err: e && e.message}); console.error('Test error:', name, e); }
+        }
+        // drawItem exists & supports known types
+        assert('drawItem is defined', ()=> typeof drawItem === 'function');
+        const tctx = document.createElement('canvas').getContext('2d');
+        ;['sofa','table','bed','wardrobe','stove','sink','fridge','bath','toilet','plant','rug','floorLamp','tv','painting'].forEach(tp=>{
+          assert('drawItem '+tp, ()=>{ drawItem(tctx,{type:tp,x:2,y:2,w:24,h:24}); return true; });
+        });
+        // generate diffs counts and conflict-free
+        for(let lv=1; lv<=LEVELS; lv++){
+          const base = makeSingleRoom(lv);
+          const diffs = generateDiffs(lv, base);
+          const expected = BASE_DIFFS + DIFFS_STEP*(lv-1);
+          assert(`generateDiffs level ${lv} == ${expected}`, ()=> diffs.length === expected);
+          const removed = new Set(diffs.filter(d=>d.kind==='removeItem').map(d=>d.target));
+          assert('no diff targets removed item', ()=> diffs.every(d=> d.kind==='removeItem' || d.kind==='extraItem' || d.kind==='wallColor' || d.kind==='paintingVariant' || !removed.has(d.target)) );
+        }
+        // misses behaviour
+        (function testMisses(){
+          misses = 0; gameOver = false; registerMiss('t1');
+          assert('after 1 miss not over', ()=> misses===1 && !gameOver);
+          registerMiss('t2');
+          assert('after 2 miss not over', ()=> misses===2 && !gameOver);
+          registerMiss('t3');
+          assert('after 3 miss over', ()=> misses===3 && gameOver===true);
+          // reset
+          hideGameOver(); gameOver=false; misses=0; statusEl.textContent='';
+        })();
+
+        window.__devTestResults = results;
+        try{ console.table(results.map(r=>({test:r.name, ok:r.ok, err:r.err||''}))); }catch(_){ /* ignore */ }
+        const box = document.createElement('div'); box.id='dev-tests'; box.style.display='none'; box.textContent = JSON.stringify(results); document.body.appendChild(box);
+      })();
+    </script>
+  </body>
+</html>
