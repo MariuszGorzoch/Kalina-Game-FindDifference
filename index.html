@@ -68,7 +68,7 @@
         Kliknij <strong>Start</strong>. Każdy poziom to <strong>jedno pomieszczenie</strong> (Salon, Kuchnia, Sypialnia, Łazienka) w <strong>stylu animacji</strong> z <strong>tłem i dekoracjami</strong> (dywan, lampa, obraz, TV). Różnice mogą dotyczyć także <strong>koloru ścian</strong> lub <strong>obrazu na ścianie</strong>. Każdy kolejny poziom ma <strong>+2 różnice</strong>, jest <strong>trudniejszy</strong> i daje <strong>więcej punktów</strong>.
       </p>
 
-      <div class="board" aria-hidden="false" id="boardRoot">
+      <div class="board" aria-hidden="true" id="boardRoot">
         <div class="pane">
           <h2>Lewy obraz</h2>
           <canvas id="canvasL" width="640" height="480"></canvas>
@@ -80,6 +80,14 @@
       </div>
 
       <p id="status" class="msg center" role="status" aria-live="polite"></p>
+      <!-- WELCOME overlay -->
+      <div class="overlay show" id="welcomeScreen" aria-hidden="false">
+        <div class="go-panel">
+          <div class="go-sub">Hello! Thanks for playing our game.</div>
+          <div class="go-sub">Created by Kalina Gorzoch.</div>
+          <button id="welcomeStartBtn" aria-label="Rozpocznij grę">Start</button>
+        </div>
+      </div>
 
       <!-- GAME OVER overlay -->
       <div class="overlay" id="gameOver" aria-hidden="true">
@@ -115,6 +123,9 @@
       const statusEl = document.getElementById('status');
       const introEl = document.getElementById('intro');
       const boardRoot = document.getElementById('boardRoot');
+
+      const welcomeScreen = document.getElementById('welcomeScreen');
+      const welcomeStartBtn = document.getElementById('welcomeStartBtn');
 
       const cL = document.getElementById('canvasL');
       const cR = document.getElementById('canvasR');
@@ -485,6 +496,12 @@
       // =====================
       // ZDARZENIA UI
       // =====================
+      welcomeStartBtn.addEventListener('click', ()=>{
+        welcomeScreen.classList.remove('show');
+        welcomeScreen.setAttribute('aria-hidden', 'true');
+        boardRoot.setAttribute('aria-hidden','false');
+        startGame();
+      });
       startBtn.addEventListener('click', startGame);
       restartBtn.addEventListener('click', restartGame);
       nextBtn.addEventListener('click', nextLevel);
